@@ -12,6 +12,8 @@ class RnnAgent(Agent):
         self,
         action_space: PortfolioVector,
         window,
+        past_n_obs: int,
+        retrain_each_n_obs: int,
         hidden_units=50,
         policy="softmax",
         batch_size=32,
@@ -28,6 +30,8 @@ class RnnAgent(Agent):
         self.policy = policy
         self.window = window
         self.model = self.build_model(hidden_units)
+        self.past_n_obs = past_n_obs
+        self.retrain_each_n_obs = retrain_each_n_obs
 
     def observe(self, observation, action, reward, done, next_reward):
         self.memory.append(observation["returns"].values)
@@ -35,7 +39,7 @@ class RnnAgent(Agent):
     def split_sequences(self, sequences):
         X, y = [], []
         for i in range(len(sequences)):
-            end_ix = i + self.window
+            end_ix = i + self.past_n_obs
             if end_ix > len(sequences) - 1:
                 break
             seq_x, seq_y = sequences[i:end_ix, :], sequences[end_ix, :]
@@ -45,7 +49,7 @@ class RnnAgent(Agent):
         return np.array(X), np.array(y)
 
     def reshape_memory(self, memory):
-        return memory.reshape((1, self.window, self.observation_size))
+        return memory.reshape((1, self.past_n_obs, self.observation_size))
 
     def build_model(self, hidden_units):
         raise NotImplementedError
@@ -55,33 +59,38 @@ class RnnAgent(Agent):
         memory = np.array(self.memory)
         print(memory.shape)
 
-        if len(self.memory) < self.window + 1:
+        if len(self.memory) < self.window:
             return self.action_space.sample()
 
         X, y = self.split_sequences(memory)
 
-        print(X.shape)
-        print(y.shape)
-        self.model.fit(X, y, batch_size=self.batch_size, epochs=self.epochs, verbose=0)
+        self.model.fit(X, y, batch_size=self.batch_size,
+                       epochs=self.epochs, verbose=0)
 
-        prediction = self.model.predict(self.reshape_memory(memory[-self.window :, :]))
+        prediction = self.model.predict(
+            self.reshape_memory(memory[-self.past_n_obs:, :]))
 
         if self.policy == "softmax":
+
             action = pd.Series(
                 prediction.ravel(),
                 index=observation["returns"].index,
                 name=observation["returns"].name,
             )
             action = softmax(action)
+
             return action
+
         elif self.policy == "best":
-            action = np.zeros_like(prediction).ravell()
+
+            action = np.zeros_like(prediction).ravel()
             action[np.argmax(prediction)] = 1.0
             action = pd.Series(
                 action,
                 index=observation["returns"].index,
                 name=observation["returns"].name,
             )
+
             return action
 
 
@@ -97,14 +106,14 @@ class RnnLSTMAgent(RnnAgent):
                 hidden_units,
                 activation="relu",
                 return_sequences=True,
-                input_shape=(self.window, self.observation_size),
+                input_shape=(self.past_n_obs, self.observation_size),
             )
         )
         model.add(tf.keras.layers.LSTM(hidden_units, activation="relu"))
         model.add(tf.keras.layers.Dense(self.observation_size))
-        model.compile(optimizer="adam", loss="mse", run_eagerly=True)
+        model.compile(optimizer="adam", loss="mse")
         return model
 
 
-# TODO: add retrain_each_n_days and past_n_observations,
-# TODO: set windows to the minimum amount of observations needed to start training (should be greater than past_n_observations)
+# DONE: add retrain_each_n_days and past_n_observations,
+# DONE: set windows to the minimum amount of observations needed to start training (should be greater than past_n_observations)
