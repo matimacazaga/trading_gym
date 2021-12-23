@@ -140,3 +140,51 @@ class RnnGRUAgent(RnnAgent):
         model.add(tf.keras.layers.Dense(self.action_size))
         model.compile(optimizer="adam", loss="mse")
         return model
+
+
+class RnnConvGRUAgent(Agent):
+
+    _id = "rnn-conv-gru"
+
+    def __init__(
+        self,
+        action_space: PortfolioVector,
+        window,
+        past_n_obs: int,
+        retrain_each_n_obs: int,
+        hidden_units=50,
+        policy="softmax",
+        batch_size=32,
+        epochs=200,
+        *args,
+        **kwargs
+    ):
+        super().__init__(
+            action_space, window, past_n_obs, retrain_each_n_obs, hidden_units,
+            policy, batch_size, epochs
+        )
+
+        self.n_seq = kwargs["n_seq"]
+
+    def build_model(self, hidden_units):
+
+        model = tf.Sequential()
+        model.add(
+            tf.keras.layers.TimeDistributed(
+                tf.keras.layers.Conv1D(
+                    filters=64, kernel_size=1, padding="causal",
+                    activation="relu"
+                ),
+                input_shape=(
+                    None, int(self.past_n_obs/self.n_seq),
+                    self.observation_size)
+            )
+        )
+
+    def reshape_memory(self, memory):
+        return memory.reshape(
+            (
+                1, self.n_seq, int(self.past_n_obs/self.n_seq),
+                self.observation_size
+            )
+        )
