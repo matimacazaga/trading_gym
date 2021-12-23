@@ -51,6 +51,9 @@ class RnnAgent(Agent):
     def reshape_memory(self, memory):
         return memory.reshape((1, self.past_n_obs, self.observation_size))
 
+    def reshape_training_data(self, X):
+        return X
+
     def build_model(self, hidden_units):
         raise NotImplementedError
 
@@ -63,6 +66,8 @@ class RnnAgent(Agent):
             return self.action_space.sample()
 
         X, y = self.split_sequences(memory)
+
+        X = self.reshape_training_data(X)
 
         self.model.fit(X, y, batch_size=self.batch_size,
                        epochs=self.epochs, verbose=0)
