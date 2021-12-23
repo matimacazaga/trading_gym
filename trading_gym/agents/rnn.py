@@ -114,6 +114,24 @@ class RnnLSTMAgent(RnnAgent):
         model.compile(optimizer="adam", loss="mse")
         return model
 
-
 # DONE: add retrain_each_n_days and past_n_observations,
 # DONE: set windows to the minimum amount of observations needed to start training (should be greater than past_n_observations)
+
+
+class RnnGRUAgent(RnnAgent):
+
+    _id = "rnn-gru"
+
+    def build_model(self, hidden_units):
+
+        model = tf.keras.Sequential()
+        model.add(
+            tf.keras.layers.GRU(
+                hidden_units, activation="relu", return_sequences=True,
+                input_shape=(self.past_n_obs, self.observation_size)
+            )
+        )
+        model.add(tf.keras.layers.GRU(hidden_units, activation="relu"))
+        model.add(tf.keras.layers.Dense(self.action_size))
+        model.compile(optimizer="adam", loss="mse")
+        return model
