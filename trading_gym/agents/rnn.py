@@ -32,6 +32,7 @@ class RnnAgent(Agent):
         self.model = self.build_model(hidden_units)
         self.past_n_obs = past_n_obs
         self.retrain_each_n_obs = retrain_each_n_obs
+        self.retrain_counter = 0
 
     def observe(self, observation, action, reward, done, next_reward):
         self.memory.append(observation["returns"].values)
@@ -69,8 +70,12 @@ class RnnAgent(Agent):
 
         X = self.reshape_training_data(X)
 
-        self.model.fit(X, y, batch_size=self.batch_size,
-                       epochs=self.epochs, verbose=0)
+        if self.retrain_counter % self.retrain_each_n_obs == 0:
+
+            self.model.fit(X, y, batch_size=self.batch_size,
+                           epochs=self.epochs, verbose=0)
+
+        self.retrain_counter += 1
 
         prediction = self.model.predict(
             self.reshape_memory(memory[-self.past_n_obs:, :]))
