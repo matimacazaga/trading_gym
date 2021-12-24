@@ -124,8 +124,6 @@ class HRPAgent(Agent):
 
         memory = np.array(self.memory)
 
-        M = self.action_space.shape[0]
-
         if len(self.memory) != self.memory.maxlen:
             return self.action_space.sample()
         else:
@@ -140,5 +138,11 @@ class HRPAgent(Agent):
             w += np.abs(w.min())
 
         self.w = w / w.sum()
+
+        self.w = pd.Series(
+            self.w,
+            index=observation["returns"].index,
+            name=observation["returns"].name,
+        )
 
         return self.w
