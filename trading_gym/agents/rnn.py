@@ -140,10 +140,7 @@ class RnnLSTMAgent(RnnAgent):
         return model
 
 
-# DONE: add retrain_each_n_days and past_n_observations,
-# DONE: set windows to the minimum amount of observations needed to start training (should be greater than past_n_observations)
-
-
+# TODO: rnn classification model
 class RnnGRUAgent(RnnAgent):
 
     _id = "rnn-gru"
