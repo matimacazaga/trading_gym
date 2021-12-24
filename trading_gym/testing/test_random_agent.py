@@ -36,12 +36,12 @@ def sim_random_agent(universe, window):
 
     pickle.dump(
         env.agents[agent.name],
-        open("./poptim/testing/tests_results/random_agent_test.pickle", "wb"),
+        open("./trading_gym/testing/tests_results/random_agent_test.pickle", "wb"),
     )
 
     pickle.dump(
         stats(env.agents[agent.name].rewards.sum(axis=1)),
-        open("./poptim/testing/tests_results_random_agent_stats.pickle", "wb"),
+        open("./trading_gym/testing/tests_results_random_agent_stats.pickle", "wb"),
     )
 
 
