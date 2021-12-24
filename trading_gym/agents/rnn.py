@@ -5,6 +5,7 @@ from collections import deque
 from .base import Agent
 from ..envs.spaces import PortfolioVector
 from ..utils.numpy_utils import softmax
+from sklearn.preprocessing import StandardScaler
 
 
 class RnnAgent(Agent):
@@ -17,7 +18,7 @@ class RnnAgent(Agent):
         hidden_units=50,
         policy="softmax",
         batch_size=32,
-        epochs=200,
+        epochs=50,
         *args,
         **kwargs
     ):
@@ -33,6 +34,8 @@ class RnnAgent(Agent):
         self.retrain_each_n_obs = retrain_each_n_obs
         self.retrain_counter = 0
         self.model = self.build_model(hidden_units)
+        self.scaler = StandardScaler()
+        self.w = self.action_space.sample()
 
     def observe(self, observation, action, reward, done, next_reward):
         self.memory.append(observation["returns"].values)
@@ -65,11 +68,13 @@ class RnnAgent(Agent):
         if len(self.memory) < self.window:
             return self.action_space.sample()
 
-        X, y = self.split_sequences(memory)
-
-        X = self.reshape_training_data(X)
-
         if self.retrain_counter % self.retrain_each_n_obs == 0:
+
+            memory = self.scaler.fit_transform(memory)
+
+            X, y = self.split_sequences(memory)
+
+            X = self.reshape_training_data(X)
 
             self.model.fit(
                 X, y, batch_size=self.batch_size, epochs=self.epochs, verbose=0
@@ -78,31 +83,40 @@ class RnnAgent(Agent):
         self.retrain_counter += 1
 
         prediction = self.model.predict(
-            self.reshape_memory(memory[-self.past_n_obs :, :])
+            self.reshape_memory(
+                self.scaler.transform(
+                    memory[-self.past_n_obs :, :].reshape(
+                        -1, self.action_space.shape[0]
+                    )
+                ).ravel()
+            )
         )
 
         if self.policy == "softmax":
 
             action = pd.Series(
-                prediction.ravel(),
+                self.scaler.inverse_transform(prediction.reshape(1, -1)).ravel(),
                 index=observation["returns"].index,
                 name=observation["returns"].name,
             )
-            action = softmax(action)
 
-            return action
+            self.w = softmax(action)
+
+            return self.w
 
         elif self.policy == "best":
 
-            action = np.zeros_like(prediction).ravel()
+            action = np.zeros_like(
+                self.scaler.inverse_transform(prediction.reshape(1, -1))
+            ).ravel()
             action[np.argmax(prediction)] = 1.0
-            action = pd.Series(
+            self.w = pd.Series(
                 action,
                 index=observation["returns"].index,
                 name=observation["returns"].name,
             )
 
-            return action
+            return self.w
 
 
 class RnnLSTMAgent(RnnAgent):
