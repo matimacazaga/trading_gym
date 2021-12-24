@@ -35,7 +35,9 @@ class CLA:
         Lambdas (see Lopez de Prado).
     """
 
-    def __init__(self, mean: np.ndarray, covar: np.ndarray, lb: np.ndarray, ub: np.ndarray):
+    def __init__(
+        self, mean: np.ndarray, covar: np.ndarray, lb: np.ndarray, ub: np.ndarray
+    ):
 
         self.mean = mean
         self.covar = covar
@@ -64,23 +66,30 @@ class CLA:
                 j = 0
                 for i in f:
                     l, bi = self.compute_lambda(
-                        covar_f_inv, covar_fb, mean_f, w_b, j,
-                        [self.lb[i], self.ub[i]]
+                        covar_f_inv, covar_fb, mean_f, w_b, j, [self.lb[i], self.ub[i]]
                     )
-                    if (l is not None and l_in is not None and l > l_in) or (l is not None and l_in is None):
+                    if (l is not None and l_in is not None and l > l_in) or (
+                        l is not None and l_in is None
+                    ):
                         l_in, i_in, bi_in = l, i, bi
                     j += 1
             l_out = None
             if len(f) < self.mean.shape[0]:
                 b = self.get_b(f)
                 for i in b:
-                    covar_f, covar_fb, mean_f, w_b = self.get_matrices(f+[i])
+                    covar_f, covar_fb, mean_f, w_b = self.get_matrices(f + [i])
                     covar_f_inv = np.linalg.inv(covar_f)
                     l, bi = self.compute_lambda(
-                        covar_f_inv, covar_fb, mean_f, w_b,
-                        mean_f.shape[0] - 1, self.w[-1][i]
+                        covar_f_inv,
+                        covar_fb,
+                        mean_f,
+                        w_b,
+                        mean_f.shape[0] - 1,
+                        self.w[-1][i],
                     )
-                    if (self.l[-1] == None or l is None or l < self.l[-1]) and (l is not None and (l_out is None or l > l_out)):
+                    if (self.l[-1] == None or l is None or l < self.l[-1]) and (
+                        l is not None and (l_out is None or l > l_out)
+                    ):
                         l_out, i_out = l, i
             if (l_in == None or l_in < 0) and (l_out == None or l_out < 0):
 
@@ -125,7 +134,7 @@ class CLA:
         while sum(w) < 1:
             i -= 1
             w[b[i][0]] = self.ub[b[i][0]]
-        w[b[i][0]] += 1-sum(w)
+        w[b[i][0]] += 1 - sum(w)
         return [b[i][0]], w
 
     def compute_bi(self, c, bi):
@@ -142,17 +151,17 @@ class CLA:
         g1 = np.dot(np.dot(ones_f.T, covar_f_inv), mean_f)
         g2 = np.dot(np.dot(ones_f.T, covar_f_inv), ones_f)
         if w_b is None:
-            g, w1 = float(-self.l[-1]*g1/g2 + 1/g2), 0
+            g, w1 = float(-self.l[-1] * g1 / g2 + 1 / g2), 0
         else:
             ones_b = np.ones(w_b.shape)
             g3 = np.dot(ones_b.T, w_b)
             g4 = np.dot(covar_f_inv, covar_fb)
             w1 = np.dot(g4, w_b)
             g4 = np.dot(ones_f.T, w1)
-            g = float(-self.l[-1]*g1/g2+(1.-g3*g4)/g2)
+            g = float(-self.l[-1] * g1 / g2 + (1.0 - g3 * g4) / g2)
         w2 = np.dot(covar_f_inv, ones_f)
         w3 = np.dot(covar_f_inv, mean_f)
-        return -w1+g*w2+self.l[-1]*w3, g
+        return -w1 + g * w2 + self.l[-1] * w3, g
 
     def compute_lambda(self, covar_f_inv, covar_fb, mean_f, w_b, i, bi):
 
@@ -161,20 +170,20 @@ class CLA:
         c2 = np.dot(covar_f_inv, mean_f)
         c3 = np.dot(np.dot(ones_f.T, covar_f_inv), mean_f)
         c4 = np.dot(covar_f_inv, ones_f)
-        c = -c1*c2[i]+c3*c4[i]
+        c = -c1 * c2[i] + c3 * c4[i]
         if c == 0:
             return None, None
         if type(bi) == list:
             bi = self.compute_bi(c, bi)
         if w_b is None:
-            return float((c4[i]-c1*bi)/c), bi
+            return float((c4[i] - c1 * bi) / c), bi
         else:
             ones_b = np.ones(w_b.shape)
             l1 = np.dot(ones_b.T, w_b)
             l2 = np.dot(covar_f_inv, covar_fb)
             l3 = np.dot(l2, w_b)
             l2 = np.dot(ones_f.T, l3)
-            return float(((1-l1+l2)*c4[i]-c1*(bi+l3[i]))/c), bi
+            return float(((1 - l1 + l2) * c4[i] - c1 * (bi + l3[i])) / c), bi
 
     def get_matrices(self, f):
 
@@ -191,23 +200,23 @@ class CLA:
 
     def diff_lists(self, list_1, list_2):
 
-        return list(set(list_1)-set(list_2))
+        return list(set(list_1) - set(list_2))
 
     def reduce_matrix(self, matrix, list_x, list_y):
 
         if len(list_x) == 0 or len(list_y) == 0:
             return
 
-        matrix_ = matrix[:, list_y[0]:list_y[0]+1]
+        matrix_ = matrix[:, list_y[0] : list_y[0] + 1]
 
         for i in list_y[1:]:
-            a = matrix[:, i:i+1]
+            a = matrix[:, i : i + 1]
             matrix_ = np.append(matrix_, a, 1)
 
-        matrix__ = matrix_[list_x[0]:list_x[0]+1, :]
+        matrix__ = matrix_[list_x[0] : list_x[0] + 1, :]
 
         for i in list_x[1:]:
-            a = matrix_[i:i+1, :]
+            a = matrix_[i : i + 1, :]
             matrix__ = np.append(matrix__, a, 0)
 
         return matrix__
@@ -244,12 +253,12 @@ class CLA:
 
                 i += 1
 
-                if i == len(self.w)-1:
+                if i == len(self.w) - 1:
                     break
 
                 w = self.w[i]
                 mu = np.dot(w.T, self.mean)[0, 0]
-                j, repeat = i+1, False
+                j, repeat = i + 1, False
                 while True:
                     if j == len(self.w):
                         break
@@ -271,23 +280,23 @@ class CLA:
         for w in self.w:
             a = np.dot(np.dot(w.T, self.covar), w)
             var.append(a)
-        return min(var)**0.5, self.w[var.index(min(var))]
+        return min(var) ** 0.5, self.w[var.index(min(var))]
 
     def get_max_sr(self):
 
         w_sr, sr = [], []
 
-        for i in range(len(self.w)-1):
+        for i in range(len(self.w) - 1):
 
             w0 = np.copy(self.w[i])
 
-            w1 = np.copy(self.w[i+1])
+            w1 = np.copy(self.w[i + 1])
 
             kargs = {"minimum": False, "args": (w0, w1)}
 
             a, b = self.golde_section(self.eval_sr, 0, 1, **kargs)
 
-            w_sr.append(a*w0+(1-a)*w1)
+            w_sr.append(a * w0 + (1 - a) * w1)
 
             sr.append(b)
 
@@ -295,17 +304,17 @@ class CLA:
 
     def eval_sr(self, a, w0, w1):
 
-        w = a*w0+(1-a)*w1
+        w = a * w0 + (1 - a) * w1
 
         b = np.dot(w.T, self.mean)[0, 0]
 
-        c = np.dot(np.dot(w.T, self.covar), w)[0, 0]**0.5
+        c = np.dot(np.dot(w.T, self.covar), w)[0, 0] ** 0.5
 
-        return b/c
+        return b / c
 
     def golden_section(self, obj, a, b, **kargs):
 
-        tol, sign, args = 1.e-9, 1, None
+        tol, sign, args = 1.0e-9, 1, None
 
         if "minimum" in kargs and kargs["minimum"] == False:
 
@@ -314,56 +323,55 @@ class CLA:
         if "args" in kargs:
             args = kargs["args"]
 
-        num_iter = int(ceil(-2.078087*log(tol/abs(b-a))))
+        num_iter = int(ceil(-2.078087 * log(tol / abs(b - a))))
 
         r = 0.618033989
 
-        c = 1.-r
+        c = 1.0 - r
 
-        x1 = r*a+c*b
+        x1 = r * a + c * b
 
-        x2 = c*a+r*b
+        x2 = c * a + r * b
 
-        f1 = sign*obj(x1, *args)
+        f1 = sign * obj(x1, *args)
 
-        f2 = sign*obj(x2, *args)
+        f2 = sign * obj(x2, *args)
 
         for i in range(num_iter):
             if f1 > f2:
                 a = x1
                 x1 = x2
                 f1 = f2
-                x2 = c*a+r*b
-                f2 = sign*obj(x2, *args)
+                x2 = c * a + r * b
+                f2 = sign * obj(x2, *args)
             else:
                 b = x2
                 x2 = x1
                 f1 = f2
-                x1 = r*a + c*b
-                f1 = sign*obj(x1, *args)
+                x1 = r * a + c * b
+                f1 = sign * obj(x1, *args)
         if f1 < f2:
-            return x1, sign*f1
+            return x1, sign * f1
         else:
-            return x2, sign*f2
+            return x2, sign * f2
 
     def ef_frontier(self, points):
         mu, sigma, weights = [], [], []
-        a = np.linspace(0, 1, points/len(self.w))[:-1]
-        b = range(len(self.w)-1)
+        a = np.linspace(0, 1, points / len(self.w))[:-1]
+        b = range(len(self.w) - 1)
         for i in b:
-            w0, w1 = self.w[i], self.w[i+1]
+            w0, w1 = self.w[i], self.w[i + 1]
             if i == b[-1]:
-                a = np.linspace(0, 1, points/len(self.w))
+                a = np.linspace(0, 1, points / len(self.w))
             for j in a:
-                w = w1*j + (1. - j)*w0
+                w = w1 * j + (1.0 - j) * w0
                 weights.append(np.copy(w))
                 mu.append(np.dot(w.T, self.mean)[0, 0])
-                sigma.append(np.dot(np.dot(w.T, self.covar), w)[0, 0]**0.5)
+                sigma.append(np.dot(np.dot(w.T, self.covar), w)[0, 0] ** 0.5)
         return mu, sigma, weights
 
 
 class CLAAgent(Agent):
-
     def __init__(self, action_space, J, window, *args, **kwargs):
 
         self.action_space = action_space
@@ -399,10 +407,20 @@ class CLAAgent(Agent):
             if np.any(self.w < 0):
                 self.w += np.abs(self.w.min())
             self.w /= self.w.sum()
-            return self.w.ravel()
+            self.w = pd.Series(
+                self.w.ravel(),
+                index=observation["returns"].index,
+                name=observation["returns"].name,
+            )
+            return self.w
         else:
             self.w = cla_algo.get_max_sr()[1]
             if np.any(self.w < 0):
                 self.w += np.abs(self.w.min())
             self.w /= self.w.sum()
-            return self.w.ravel()
+            self.w = pd.Series(
+                self.w.ravel(),
+                index=observation["returns"].index,
+                name=observation["returns"].name,
+            )
+            return self.w

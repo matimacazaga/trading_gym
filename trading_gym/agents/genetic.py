@@ -227,4 +227,10 @@ class GeneticAgent(Agent):
 
         self.w /= self.w.sum()
 
+        self.w = pd.Series(
+            self.w,
+            index=observation["returns"].index,
+            name=observation["returns"].name,
+        )
+
         return self.w

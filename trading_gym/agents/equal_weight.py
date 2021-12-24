@@ -29,4 +29,11 @@ class EqualWeightAgent(Agent):
         self.w = np.full(
             shape=self.universe_length, fill_value=1.0 / self.universe_length
         )
+
+        self.w = pd.Series(
+            self.w,
+            index=observation["returns"].index,
+            name=observation["returns"].name,
+        )
+
         return self.w

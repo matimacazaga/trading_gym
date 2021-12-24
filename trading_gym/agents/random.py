@@ -26,4 +26,9 @@ class RandomAgent(Agent):
 
         self.w = np.random.uniform(0.0, 1.0, size=self.universe_length)
         self.w /= self.w.sum()
+        self.w = pd.Series(
+            self.w,
+            index=observation["returns"].index,
+            name=observation["returns"].name,
+        )
         return self.w
