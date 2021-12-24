@@ -29,10 +29,10 @@ class RnnAgent(Agent):
         self.epochs = epochs
         self.policy = policy
         self.window = window
-        self.model = self.build_model(hidden_units)
         self.past_n_obs = past_n_obs
         self.retrain_each_n_obs = retrain_each_n_obs
         self.retrain_counter = 0
+        self.model = self.build_model(hidden_units)
 
     def observe(self, observation, action, reward, done, next_reward):
         self.memory.append(observation["returns"].values)
@@ -61,7 +61,6 @@ class RnnAgent(Agent):
     def act(self, observation):
 
         memory = np.array(self.memory)
-        print(memory.shape)
 
         if len(self.memory) < self.window:
             return self.action_space.sample()
@@ -72,13 +71,15 @@ class RnnAgent(Agent):
 
         if self.retrain_counter % self.retrain_each_n_obs == 0:
 
-            self.model.fit(X, y, batch_size=self.batch_size,
-                           epochs=self.epochs, verbose=0)
+            self.model.fit(
+                X, y, batch_size=self.batch_size, epochs=self.epochs, verbose=0
+            )
 
         self.retrain_counter += 1
 
         prediction = self.model.predict(
-            self.reshape_memory(memory[-self.past_n_obs:, :]))
+            self.reshape_memory(memory[-self.past_n_obs :, :])
+        )
 
         if self.policy == "softmax":
 
@@ -124,6 +125,7 @@ class RnnLSTMAgent(RnnAgent):
         model.compile(optimizer="adam", loss="mse")
         return model
 
+
 # DONE: add retrain_each_n_days and past_n_observations,
 # DONE: set windows to the minimum amount of observations needed to start training (should be greater than past_n_observations)
 
@@ -137,8 +139,10 @@ class RnnGRUAgent(RnnAgent):
         model = tf.keras.Sequential()
         model.add(
             tf.keras.layers.GRU(
-                hidden_units, activation="relu", return_sequences=True,
-                input_shape=(self.past_n_obs, self.observation_size)
+                hidden_units,
+                activation="relu",
+                return_sequences=True,
+                input_shape=(self.past_n_obs, self.observation_size),
             )
         )
         model.add(tf.keras.layers.GRU(hidden_units, activation="relu"))
@@ -165,8 +169,14 @@ class RnnConvGRUAgent(Agent):
         **kwargs
     ):
         super().__init__(
-            action_space, window, past_n_obs, retrain_each_n_obs, hidden_units,
-            policy, batch_size, epochs
+            action_space,
+            window,
+            past_n_obs,
+            retrain_each_n_obs,
+            hidden_units,
+            policy,
+            batch_size,
+            epochs,
         )
 
         self.n_seq = kwargs["n_seq"]
@@ -177,19 +187,17 @@ class RnnConvGRUAgent(Agent):
         model.add(
             tf.keras.layers.TimeDistributed(
                 tf.keras.layers.Conv1D(
-                    filters=64, kernel_size=1, padding="causal",
-                    activation="relu"
+                    filters=64, kernel_size=1, padding="causal", activation="relu"
                 ),
                 input_shape=(
-                    None, int(self.past_n_obs/self.n_seq),
-                    self.observation_size)
+                    None,
+                    int(self.past_n_obs / self.n_seq),
+                    self.observation_size,
+                ),
             )
         )
 
     def reshape_memory(self, memory):
         return memory.reshape(
-            (
-                1, self.n_seq, int(self.past_n_obs/self.n_seq),
-                self.observation_size
-            )
+            (1, self.n_seq, int(self.past_n_obs / self.n_seq), self.observation_size)
         )
