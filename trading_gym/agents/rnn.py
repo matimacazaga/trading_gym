@@ -38,7 +38,7 @@ class RnnAgent(Agent):
         self.w = self.action_space.sample()
 
     def observe(self, observation, action, reward, done, next_reward):
-        self.memory.append(observation["returns"].values)
+        self.memory.append(observation["returns"])
 
     def split_sequences(self, sequences):
         X, y = [], []
@@ -63,16 +63,18 @@ class RnnAgent(Agent):
 
     def act(self, observation):
 
-        memory = np.array(self.memory)
+        memory = pd.DataFrame(self.memory)
+
+        memory.dropna(axis=1, inplace=True)
 
         if len(self.memory) < self.window:
             return self.action_space.sample()
 
         if self.retrain_counter % self.retrain_each_n_obs == 0:
 
-            memory = self.scaler.fit_transform(memory)
+            memory_ = self.scaler.fit_transform(memory.values)
 
-            X, y = self.split_sequences(memory)
+            X, y = self.split_sequences(memory_)
 
             X = self.reshape_training_data(X)
 
@@ -85,7 +87,7 @@ class RnnAgent(Agent):
         prediction = self.model.predict(
             self.reshape_memory(
                 self.scaler.transform(
-                    memory[-self.past_n_obs :, :].reshape(
+                    memory.values[-self.past_n_obs :, :].reshape(
                         -1, self.action_space.shape[0]
                     )
                 ).ravel()
@@ -94,29 +96,25 @@ class RnnAgent(Agent):
 
         if self.policy == "softmax":
 
-            action = pd.Series(
-                self.scaler.inverse_transform(prediction.reshape(1, -1)).ravel(),
-                index=observation["returns"].index,
-                name=observation["returns"].name,
-            )
+            w = self.scaler.inverse_transform(prediction.reshape(1, -1)).ravel()
 
-            self.w = softmax(action)
-
-            return self.w
+            w = softmax(w)
 
         elif self.policy == "best":
 
-            action = np.zeros_like(
+            w = np.zeros_like(
                 self.scaler.inverse_transform(prediction.reshape(1, -1))
             ).ravel()
-            action[np.argmax(prediction)] = 1.0
-            self.w = pd.Series(
-                action,
-                index=observation["returns"].index,
-                name=observation["returns"].name,
-            )
 
-            return self.w
+            w[np.argmax(prediction)] = 1.0
+
+        self.w = pd.Series(
+            w,
+            index=memory.columns,
+            name=observation["returns"].name,
+        )
+
+        return self.w
 
 
 class RnnLSTMAgent(RnnAgent):

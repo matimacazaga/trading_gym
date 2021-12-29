@@ -20,11 +20,11 @@ class RandomAgent(Agent):
 
     def observe(self, observation: Dict[str, pd.DataFrame], *args, **kwargs):
 
-        self.memory.append(observation["returns"].values)
+        self.memory.append(observation["returns"])
 
     def act(self, observation: Dict[str, pd.DataFrame]) -> np.ndarray:
 
-        self.w = np.random.uniform(0.0, 1.0, size=self.universe_length)
+        self.w = np.random.uniform(0.0, 1.0, size=len(observation["returns"]))
         self.w /= self.w.sum()
         self.w = pd.Series(
             self.w,

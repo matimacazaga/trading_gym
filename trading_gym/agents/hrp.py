@@ -118,17 +118,20 @@ class HRPAgent(Agent):
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs):
 
-        self.memory.append(observation["returns"].values)
+        self.memory.append(observation["returns"])
 
     def act(self, observation: Dict[str, pd.Series]) -> np.ndarray:
 
-        memory = np.array(self.memory)
+        memory = pd.DataFrame(self.memory)
+
+        memory.dropna(axis=1, inplace=True)
 
         if len(self.memory) != self.memory.maxlen:
+
             return self.action_space.sample()
         else:
-            sigma = pd.DataFrame(np.cov(memory.T))
-            corr = pd.DataFrame(np.corrcoef(memory.T))
+            sigma = pd.DataFrame(np.cov(memory, rowvar=False))
+            corr = pd.DataFrame(np.corrcoef(memory, rowvar=False))
 
         hrp_algo = HRP(sigma, corr)
 
@@ -141,7 +144,7 @@ class HRPAgent(Agent):
 
         self.w = pd.Series(
             self.w,
-            index=observation["returns"].index,
+            index=memory.columns,
             name=observation["returns"].name,
         )
 
