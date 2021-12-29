@@ -34,15 +34,23 @@ class BaseEnv(Env):
 
         def __init__(self, index, columns):
 
-            self.actions = pd.DataFrame(columns=columns, index=index, dtype=float)
+            # self.actions = pd.DataFrame(columns=columns, index=index, dtype=float)
+            self.actions = {}
 
-            self.actions.iloc[0] = np.zeros(len(columns))
+            self.actions[index[0]] = pd.Series(
+                {col: 0.0 if col != "Cash" else 1.0 for col in columns}
+            )
 
-            self.actions.iloc[0]["Cash"] = 1.0
+            self.rewards = {}
 
-            self.rewards = pd.DataFrame(columns=columns, index=index, dtype=float)
+            self.rewards[index[0]] = pd.Series({col: 0.0 for col in columns})
+            # self.actions.iloc[0] = np.zeros(len(columns))
 
-            self.rewards.iloc[0] = np.zeros(len(columns))
+            # self.actions.iloc[0]["Cash"] = 1.0
+
+            # self.rewards = pd.DataFrame(columns=columns, index=index, dtype=float)
+
+            # self.rewards.iloc[0] = np.zeros(len(columns))
 
     def __init__(
         self,
@@ -56,15 +64,15 @@ class BaseEnv(Env):
 
         if assets_data is not None and isinstance(assets_data, pd.DataFrame):
 
-            self.close = clean(assets_data["close"])
+            self.close = assets_data["close"]
 
-            self.open = clean(assets_data["open"])
+            self.open = assets_data["open"]
 
-            self.high = clean(assets_data["high"])
+            self.high = assets_data["high"]
 
-            self.low = clean(assets_data["low"])
+            self.low = assets_data["low"]
 
-            self.volume = clean(assets_data["volume"])
+            self.volume = assets_data["volume"]
 
         elif universe is not None and isinstance(universe, list):
 
@@ -72,36 +80,39 @@ class BaseEnv(Env):
                 kwargs["start"], kwargs["end"], universe
             )
 
-            self.close = clean(assets_data["close"])
+            self.close = assets_data["close"]
 
-            self.open = clean(assets_data["open"])
+            self.open = assets_data["open"]
 
-            self.high = clean(assets_data["high"])
+            self.high = assets_data["high"]
 
-            self.low = clean(assets_data["low"])
+            self.low = assets_data["low"]
 
-            self.volume = clean(assets_data["volume"])
+            self.volume = assets_data["volume"]
 
         else:
 
             raise ValueError("Either universe or assets_data must be provided.")
 
         if cash:
-            self.close.loc[:, "CASH"] = 1.0
-            self.open.loc[:, "CASH"] = 1.0
-            self.high.loc[:, "CASH"] = 1.0
-            self.low.loc[:, "CASH"] = 1.0
-            self.volume.loc[:, "CASH"] = 1.0
+            self.close.loc[:, "Cash"] = 1.0
+            self.open.loc[:, "Cash"] = 1.0
+            self.high.loc[:, "Cash"] = 1.0
+            self.low.loc[:, "Cash"] = 1.0
+            self.volume.loc[:, "Cash"] = 1.0
 
         if returns is not None and isinstance(returns, pd.DataFrame):
-            self._returns = clean(returns)
+            self._returns = returns
         elif returns is None and (
             self.close is not None and isinstance(self.close, pd.DataFrame)
         ):
-            self._returns = clean(self.close.pct_change())
+            self._returns = self.close.pct_change().iloc[1:]
 
             if cash:
-                self._returns.loc[:, "CASH"] = (1.0 + risk_free_rate) ** (1 / 365.0) - 1
+                self._returns.loc[:, "Cash"] = (
+                    1.0
+                    + np.random.normal(risk_free_rate, 0.01, size=len(self._returns))
+                ) ** (1 / 365.0) - 1
 
             self.close = align_index(self._returns, self.close)
 
@@ -115,7 +126,9 @@ class BaseEnv(Env):
 
         num_instruments = len(self.universe)
 
-        self.action_space = PortfolioVector(num_instruments)
+        self.action_space = PortfolioVector(
+            num_instruments, universe + ["Cash"] if cash else universe
+        )
 
         self.observation = Box(
             low=-np.inf, high=np.inf, shape=(num_instruments,), dtype=np.float32
@@ -184,12 +197,12 @@ class BaseEnv(Env):
         Get the current observation.
         """
         ob = {}
-        ob["close"] = self.close.loc[self.index, :]
-        ob["open"] = self.open.loc[self.index, :]
-        ob["low"] = self.low.loc[self.index, :]
-        ob["high"] = self.high.loc[self.index, :]
-        ob["volume"] = self.volume.loc[self.index, :]
-        ob["returns"] = self._returns.loc[self.index, :]
+        ob["close"] = self.close.loc[self.index, :].dropna()
+        ob["open"] = self.open.loc[self.index, :].dropna()
+        ob["low"] = self.low.loc[self.index, :].dropna()
+        ob["high"] = self.high.loc[self.index, :].dropna()
+        ob["volume"] = self.volume.loc[self.index, :].dropna()
+        ob["returns"] = self._returns.loc[self.index, :].dropna()
 
         return ob
 
@@ -197,7 +210,7 @@ class BaseEnv(Env):
         """
         Get agent's reward.
         """
-        return self._returns.loc[self.index] * action
+        return (self._returns.loc[self.index] * action).fillna(0.0)
 
     def _get_done(self) -> bool:
         """
@@ -307,12 +320,33 @@ class BaseEnv(Env):
         reward = {}
 
         for name, _action in action.items():
+
+            nan_symbols = {
+                symbol: 0.0 for symbol in self.universe if symbol not in _action.index
+            }
+
+            _action = _action.append(pd.Series(nan_symbols))
+
             if not self.action_space.contains(_action):
                 raise ValueError(f"Invalid action for agent {name}: {_action}")
 
-            self.agents[name].actions.loc[self.index] = _action
-            self.agents[name].rewards.loc[self.index] = self._get_reward(_action)
-            reward[name] = self.agents[name].rewards.loc[self.index].sum()
+            # self.agents[name].actions.loc[self.index] = _action
+            self.agents[name].actions[self.index] = _action
+            # self.agents[name].rewards.loc[self.index] = self._get_reward(_action)
+            reward_ = self._get_reward(_action)
+
+            self.agents[name].rewards[self.index] = reward_
+            # reward[name] = self.agents[name].rewards.loc[self.index].sum()
+            reward[name] = reward_.sum()
+
+            if done:
+                self.agents[name].actions = pd.DataFrame.from_dict(
+                    self.agents[name].actions, orient="index"
+                )
+
+                self.agents[name].rewards = pd.DataFrame.from_dict(
+                    self.agents[name].rewards, orient="index"
+                )
 
         return observation, reward, done, info
 
