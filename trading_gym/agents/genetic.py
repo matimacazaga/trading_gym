@@ -8,183 +8,151 @@ from .base import Agent
 from dataclasses import dataclass
 from joblib import Parallel, delayed
 from ..envs.spaces import PortfolioVector
-from numba import prange, int64, float64, typed, types
+from numba import prange, int64, float64, typed, types, njit
 from numba.experimental import jitclass
 
 eps = np.finfo(float).eps
 
-spec = [
-    ("mean_returns", float64[:]),
-    ("sigma_returns", float64[:, :]),
-    ("pop_size", int64),
-    ("generations", int64),
-    ("mutation_prob", float64),
-    ("crossover_prob", float64),
-    ("tournament_contestants", int64),
-    ("max_weight", float64),
-]
+
+@njit(nogil=True)
+def create_individual(genome_size: int):
+    genome = np.zeros(genome_size)
+    for i in range(genome_size):
+        genome[i] = np.random.uniform(0.0, 100.0)
+
+    return genome
 
 
-@jitclass(spec)
-class GeneticAlgorithm:
-    def __init__(
-        self,
-        mean_returns: np.ndarray,
-        sigma_returns: np.ndarray,
-        pop_size: int = 100,
-        generations: int = 10,
-        mutation_prob: float = 0.25,
-        crossover_prob: float = 0.75,
-        tournament_contestants: int = 25,
-        max_weight: float = 1.0,
-    ):
-        self.mean_returns = mean_returns
-        self.sigma_returns = sigma_returns
-        self.pop_size = pop_size
-        self.generations = generations
-        self.mutation_prob = mutation_prob
-        self.crossover_prob = crossover_prob
-        self.tournament_contestants = tournament_contestants
-        self.max_weight = max_weight
+@njit(nogil=True)
+def evaluate_individual(
+    individual: np.ndarray,
+    mean_returns: np.ndarray,
+    sigma_returns: np.ndarray,
+    max_weight: float,
+) -> float:
 
-    def _create_individual(self) -> Dict[str, Any]:
-        genome = np.zeros(self.mean_returns.shape[0])
-        for i in range(len(genome)):
-            genome[i] = np.random.uniform(0.0, 100.0)
-
-        individual = (genome, np.nan)
-
-        return individual
-
-    def create_population(self) -> List[Tuple[np.ndarray, float]]:
-        pop = []
-        for _ in range(self.pop_size):
-            pop.append(self._create_individual())
-        return pop
-
-    def mutation(
-        self, individual: Tuple[np.ndarray, float]
-    ) -> Tuple[np.ndarray, float]:
-        if np.random.uniform(0.0, 1.0) < self.mutation_prob:
-            for gen in range(len(individual[0])):
-                individual[0][gen] = individual[0][gen] * np.random.uniform(0.5, 1.5)
-
-        return individual
-
-    def crossover(
-        self,
-        individual_1: Tuple[np.ndarray, float],
-        individual_2: Tuple[np.ndarray, float],
-    ) -> Tuple[Tuple[np.ndarray, float], Tuple[np.ndarray, float]]:
-
-        if np.random.uniform(0.0, 1.0) < self.crossover_prob:
-            dice = np.random.randint(1, len(individual_1[0]))
-            child_1 = (
-                np.hstack((individual_1[0][:dice], individual_2[0][dice:])),
-                np.nan,
-            )
-            child_2 = (
-                np.hstack((individual_2[0][:dice], individual_1[0][dice:])),
-                np.nan,
-            )
-
-            return child_1, child_2
-
-        return individual_1, individual_2
-
-    def tournament_selection(
-        self, pop: List[Tuple[np.ndarray, float]]
-    ) -> Tuple[np.ndarray, float]:
-
-        indexes = np.random.choice(
-            np.arange(0, self.pop_size),
-            size=self.tournament_contestants,
-            replace=False,
-        )
-
-        tournament = []
-        for i in indexes:
-            tournament.append(pop[i])
-
-        fitnesses = np.zeros(len(tournament))
-        for i in range(len(tournament)):
-            fitnesses[i] = tournament[i][1]
-
-        best_fit = tournament[np.argmax(fitnesses)]
-
-        return best_fit
-
-    def evaluation_function(
-        self, individual: Tuple[np.ndarray, float]
-    ) -> Tuple[np.ndarray, float]:
-
-        constrain = False
-        norm_w = individual[0] / individual[0].sum()
-        if norm_w.sum() == 1.0:
-            if np.any(norm_w > self.max_weight):
-                fitness = 0.0
-                mu_portfolio = 0.0
-                constrain = True
-            if not constrain:
-                mu_portfolio = np.dot(self.mean_returns, norm_w)
-                sigma_portfolio = np.sqrt(
-                    np.dot(np.dot(norm_w, self.sigma_returns), norm_w)
-                )
-                fitness = mu_portfolio / (sigma_portfolio + eps)
-
-        else:
+    constrain = False
+    norm_w = individual / individual.sum()
+    if norm_w.sum() == 1.0:
+        if np.any(norm_w > max_weight):
             fitness = 0.0
             mu_portfolio = 0.0
+            constrain = True
+        if not constrain:
+            mu_portfolio = np.dot(mean_returns, norm_w)
+            sigma_portfolio = np.sqrt(np.dot(np.dot(norm_w, sigma_returns), norm_w))
+            fitness = mu_portfolio / (sigma_portfolio + eps)
 
-        return (individual[0], fitness)
+    else:
+        fitness = 0.0
+        mu_portfolio = 0.0
 
-    def evolve(self):
+    return fitness
 
-        pop = self.create_population()
 
-        hof = (np.zeros(self.mean_returns.shape[0]), np.nan)
+@njit(nogil=True)
+def tournament_selection(
+    participants: np.ndarray,
+    fitnesses: np.ndarray,
+) -> np.ndarray:
 
-        for _ in range(self.generations):
+    best_fit = participants[np.argmax(fitnesses), :]
 
-            for i in prange(self.pop_size):
-                pop[i] = self.evaluation_function(pop[i])
+    return best_fit
 
-            fitnesses = np.zeros(self.pop_size)
-            for i in prange(self.pop_size):
-                fitnesses[i] = pop[i][1]
 
-            best_in_generation = pop[np.argmax(fitnesses)]
+@njit(nogil=True)
+def crossover(
+    individual_1: np.ndarray, individual_2: np.ndarray, crossover_prob: float
+) -> Tuple[np.ndarray]:
+    if np.random.uniform(0.0, 1.0) < crossover_prob:
+        dice = np.random.randint(1, len(individual_1))
+        child_1 = np.hstack((individual_1[:dice], individual_2[dice:]))
+        child_2 = np.hstack((individual_2[:dice], individual_1[dice:]))
 
-            if best_in_generation[1] > hof[1] or np.isnan(hof[1]):
-                hof = best_in_generation
+        return child_1, child_2
+    return individual_1, individual_2
 
-            selected = []
-            for i in prange(self.pop_size):
-                selected.append(self.tournament_selection(pop))
 
-            selected_A = []
-            selected_B = []
-            indexes = np.arange(0, self.pop_size)
-            np.random.shuffle(indexes)
+@njit(nogil=True)
+def mutation(individual: np.ndarray, mutation_prob: float):
 
-            for i in range(0, int(self.pop_size * 0.5)):
-                selected_A.append(selected[indexes[i]])
+    if np.random.uniform(0.0, 1.0) < mutation_prob:
+        individual_ = np.zeros(len(individual))
+        for gen in range(len(individual)):
+            individual_[gen] = individual[gen] * np.random.uniform(0.5, 1.5)
 
-            for i in range(int(self.pop_size * 0.5), self.pop_size):
-                selected_B.append(selected[indexes[i]])
+        return individual_
+    return individual
 
-            next_generation = []
-            for i in prange(len(selected_A)):
-                child_1, child_2 = self.crossover(selected_A[i], selected_B[i])
-                next_generation.append(child_1)
-                next_generation.append(child_2)
 
-            for i in prange(len(next_generation)):
-                next_generation[i] = self.mutation(next_generation[i])
+@njit(nogil=True, parallel=False)
+def run_genetic_algorithm(
+    mean_returns: np.ndarray,
+    sigma_returns: np.ndarray,
+    pop_size: int = 100,
+    generations: int = 100,
+    mutation_prob: float = 0.25,
+    crossover_prob: float = 0.75,
+    tournament_contestants: int = 25,
+    max_weight: float = 1.0,
+):
 
-            pop = next_generation
+    genome_size = mean_returns.shape[0]
+    best_individual = np.zeros(genome_size)
+    best_fitness = np.nan
+    population = np.zeros((pop_size, genome_size))
 
-        return hof[0]
+    for i in prange(pop_size):
+        population[i, :] = create_individual(genome_size)
+
+    for _ in range(generations):
+        fitnesses = np.zeros(pop_size)
+        for i in prange(pop_size):
+            fitnesses[i] = evaluate_individual(
+                population[i], mean_returns, sigma_returns, max_weight
+            )
+
+        best_index = np.argmax(fitnesses)
+
+        if fitnesses[best_index] > best_fitness or np.isnan(best_fitness):
+            best_fitness = fitnesses[best_index]
+            best_individual = population[best_index]
+
+        selected = np.zeros((pop_size, genome_size))
+        for i in prange(pop_size):
+            indexes = np.random.choice(
+                np.arange(0, pop_size),
+                size=tournament_contestants,
+                replace=False,
+            )
+            selected[i, :] = tournament_selection(
+                population[indexes], fitnesses[indexes]
+            )
+
+        np.random.shuffle(selected)
+
+        selected_A = selected[int(0.5 * pop_size) :]
+
+        selected_B = selected[: int(0.5 * pop_size)]
+
+        next_generation_1 = np.zeros((int(0.5 * pop_size), genome_size))
+
+        next_generation_2 = np.zeros((int(0.5 * pop_size), genome_size))
+
+        for i in prange(int(0.5 * pop_size)):
+            child_1, child_2 = crossover(selected_A[i], selected_B[i], crossover_prob)
+            next_generation_1[i, :] = child_1
+            next_generation_2[i, :] = child_2
+
+        next_generation = np.concatenate((next_generation_1, next_generation_2))
+
+        for i in prange(pop_size):
+            next_generation[i] = mutation(next_generation[i], mutation_prob)
+
+        population = next_generation[:, :]
+
+    return best_individual
 
 
 class GeneticAgent(Agent):
@@ -205,31 +173,35 @@ class GeneticAgent(Agent):
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs) -> None:
 
-        self.memory.append(observation["returns"].values)
+        self.memory.append(observation["returns"])
 
     def act(self, observation: Dict[str, pd.Series]) -> np.ndarray:
 
-        memory = np.array(self.memory)
+        memory = pd.DataFrame(self.memory)
 
-        mu = np.mean(memory, axis=0)
+        memory.dropna(axis=1, inplace=True)
+
+        mu = np.mean(memory.values, axis=0)
 
         if len(self.memory) != self.memory.maxlen:
 
-            sigma = np.eye(self.action_space.shape[0])
+            return self.action_space.sample()
 
         else:
 
-            sigma = np.cov(memory.T)
+            sigma = np.cov(memory.values, rowvar=False)
 
-        genetic_algo = GeneticAlgorithm(mu, sigma, self.pop_size, self.generations)
+        # genetic_algo = GeneticAlgorithm(mu, sigma, self.pop_size, self.generations)
 
-        self.w = genetic_algo.evolve()
+        # self.w = genetic_algo.evolve()
 
-        self.w /= self.w.sum()
+        w = run_genetic_algorithm(mu, sigma, self.pop_size, self.generations)
+
+        w /= w.sum()
 
         self.w = pd.Series(
-            self.w,
-            index=observation["returns"].index,
+            w,
+            index=memory.columns,
             name=observation["returns"].name,
         )
 
