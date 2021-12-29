@@ -41,12 +41,12 @@ def sim_random_agent(universe, window):
 
     pickle.dump(
         stats(env.agents[agent.name].rewards.sum(axis=1)),
-        open("./trading_gym/testing/tests_results_random_agent_stats.pickle", "wb"),
+        open("./trading_gym/testing/tests_results/random_agent_stats.pickle", "wb"),
     )
 
 
 if __name__ == "__main__":
 
-    UNIVERSE = ["BTCUSDT", "ETHUSDT"]
+    UNIVERSE = ["BTCUSDT", "ETHUSDT", "MINAUSDT"]
     WINDOW = 60
     sim_random_agent(UNIVERSE, WINDOW)

@@ -10,7 +10,7 @@ def sim_hrp_agent(universe, window):
 
     env = TradingEnv(
         universe=universe,
-        cash=False,
+        cash=True,
         start=datetime(2020, 1, 1),
         end=datetime(2021, 12, 21),
     )
@@ -39,17 +39,17 @@ def sim_hrp_agent(universe, window):
 
     pickle.dump(
         env.agents[agent.name],
-        open("./poptim/testing/tests_results/hrp_agent_test.pickle", "wb"),
+        open("./trading_gym/testing/tests_results/hrp_agent_test.pickle", "wb"),
     )
 
     pickle.dump(
         stats(env.agents[agent.name].rewards.iloc[WINDOW:].sum(axis=1)),
-        open("./poptim/testing/tests_results/hrp_agent_stats.pickle", "wb"),
+        open("./trading_gym/testing/tests_results/hrp_agent_stats.pickle", "wb"),
     )
 
 
 if __name__ == "__main__":
 
-    UNIVERSE = ["BTCUSDT", "ETHUSDT"]
+    UNIVERSE = ["BTCUSDT", "ETHUSDT", "MINAUSDT"]
     WINDOW = 60
     sim_hrp_agent(UNIVERSE, WINDOW)
