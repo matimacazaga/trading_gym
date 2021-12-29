@@ -1,10 +1,9 @@
 from typing import List, Optional
-import numpy as np
 import pandas as pd
-import urllib.request
 from datetime import datetime
 from .binance_wrapper import BinanceWrapper
 import warnings
+from joblib import Parallel, delayed
 
 
 class CryptoData:
@@ -129,7 +128,10 @@ class CryptoData:
 
             universe = self.supported_symbols
 
-        for symbol in universe:
+        dfs = Parallel(n_jobs=min(40, len(universe)), backend="threading")(
+            delayed(self._get_symbol_data)(symbol, start, end) for symbol in universe
+        )
+        for symbol, temp_df in zip(universe, dfs):
             tmp_df = self._get_symbol_data(symbol, start, end)
 
             if tmp_df is not None and len(tmp_df) > 0:
