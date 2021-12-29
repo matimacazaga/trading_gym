@@ -25,7 +25,7 @@ class RnnAgent(Agent):
 
         self.action_space = action_space
         self.observation_size = self.action_space.shape[0]
-        self.memory = []
+        self.memory = deque(maxlen=window)  # []
         self.batch_size = batch_size
         self.epochs = epochs
         self.policy = policy
