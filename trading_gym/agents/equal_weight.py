@@ -22,12 +22,13 @@ class EqualWeightAgent(Agent):
 
     def observe(self, observation: Dict[str, pd.DataFrame], *args, **kwargs):
 
-        self.memory.append(observation["returns"].values)
+        self.memory.append(observation["returns"])
 
     def act(self, observation: Dict[str, pd.DataFrame]) -> np.ndarray:
 
         self.w = np.full(
-            shape=self.universe_length, fill_value=1.0 / self.universe_length
+            shape=len(observation["returns"]),
+            fill_value=1.0 / len(observation["returns"]),
         )
 
         self.w = pd.Series(
