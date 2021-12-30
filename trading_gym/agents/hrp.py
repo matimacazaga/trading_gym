@@ -5,6 +5,7 @@ import scipy.cluster.hierarchy as sch
 from .base import Agent
 from collections import deque
 from ..envs.spaces import PortfolioVector
+from pypfopt.hierarchical_portfolio import HRPOpt
 
 
 class HRP:
@@ -129,23 +130,24 @@ class HRPAgent(Agent):
         if len(self.memory) != self.memory.maxlen:
 
             return self.action_space.sample()
-        else:
-            sigma = pd.DataFrame(np.cov(memory, rowvar=False))
-            corr = pd.DataFrame(np.corrcoef(memory, rowvar=False))
 
-        hrp_algo = HRP(sigma, corr)
+        cov_matrix = memory.cov()
 
-        w = hrp_algo.get_weights()
+        hrp_algo = HRPOpt(memory, cov_matrix)
+
+        w = hrp_algo.optimize()
+        w = pd.Series(
+            list(w.values),
+            index=list(w.keys()),
+            name=observation["returns"].name,
+        )
 
         if np.any(w < 0):
             w += np.abs(w.min())
 
-        self.w = w / w.sum()
+        if w.sum() > 1.0 + 1e-2:
+            w = w / w.sum()
 
-        self.w = pd.Series(
-            self.w,
-            index=memory.columns,
-            name=observation["returns"].name,
-        )
+        self.w = w
 
         return self.w
