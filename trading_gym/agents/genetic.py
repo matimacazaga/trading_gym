@@ -159,7 +159,15 @@ class GeneticAgent(Agent):
 
     _id = "geneticagent"
 
-    def __init__(self, action_space: PortfolioVector, window: int, *args, **kwargs):
+    def __init__(
+        self,
+        action_space: PortfolioVector,
+        window: int,
+        generations: int = 100,
+        pop_size: int = 500,
+        *args,
+        **kwargs
+    ):
 
         self.action_space = action_space
 
@@ -167,9 +175,9 @@ class GeneticAgent(Agent):
 
         self.w = self.action_space.sample()
 
-        self.generations = kwargs.get("generations", 100)
+        self.generations = generations
 
-        self.pop_size = kwargs.get("pop_size", 500)
+        self.pop_size = pop_size
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs) -> None:
 
