@@ -82,27 +82,30 @@ class DeepLPortfolioAgent(Agent):
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs):
 
-        self.memory.append(observation["returns"].values)
+        self.memory.append(observation["returns"])
 
     def act(self, observation: Dict[str, pd.Series]) -> pd.Series:
 
-        memory = np.array(self.memory)
+        memory = pd.DataFrame(self.memory)
+
+        memory.dropna(axis=1, inplace=True)
 
         if len(self.memory) != self.memory.maxlen:
             return self.action_space.sample()
         else:
 
             dlpopt = DeepLPortfolio(
-                self.memory.maxlen * self.action_space.shape[0],
+                self.memory.maxlen * memory.shape[1],
                 self.hidden_units,
-                self.action_space.shape[0],
-                memory,
+                memory.shape[1],
+                memory.values,
             )
 
             model = dlpopt.build_model()
 
+            # ravel("F") ravels the array column first
             model.fit(
-                memory.ravel("F")[np.newaxis, :],
+                memory.values.ravel("F")[np.newaxis, :],
                 np.zeros(
                     (
                         1,
@@ -114,12 +117,14 @@ class DeepLPortfolioAgent(Agent):
                 verbose=0,
             )
 
-            w = model.predict(tf.constant(memory.ravel("F")[np.newaxis, :], float))[0]
+            w = model.predict(
+                tf.constant(memory.values.ravel("F")[np.newaxis, :], float)
+            )[0]
 
             self.w = pd.Series(
                 w,
-                index=observation["returns"].index,
+                index=memory.columns,
                 name=observation["returns"].name,
             )
 
-            return w
+            return self.w
