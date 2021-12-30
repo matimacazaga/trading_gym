@@ -24,8 +24,6 @@ def sim_dlpopt_agent(universe, window):
 
     ob = env.reset()
 
-    ob = ob
-
     reward = 0
 
     done = False
@@ -36,7 +34,6 @@ def sim_dlpopt_agent(universe, window):
         agent.observe(ob, None, reward, done, None)
         action = agent.act(ob)
         ob, reward, done, _ = env.step({agent.name: action})
-        ob = ob
 
     pickle.dump(
         env.agents[agent.name],
@@ -51,8 +48,6 @@ def sim_dlpopt_agent(universe, window):
 
 if __name__ == "__main__":
 
-    UNIVERSE = ["BTCUSDT", "ETHUSDT"]
+    UNIVERSE = ["BTCUSDT", "ETHUSDT", "MINAUSDT"]
     WINDOW = 180
-    PAST_N_OBS = 10
-    RETRAIN_EACH_N_OBS = 30
     sim_dlpopt_agent(UNIVERSE, WINDOW)
