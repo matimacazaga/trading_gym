@@ -132,12 +132,15 @@ class HRPAgent(Agent):
             return self.action_space.sample()
 
         cov_matrix = memory.cov()
+        try:
+            hrp_algo = HRPOpt(memory, cov_matrix)
 
-        hrp_algo = HRPOpt(memory, cov_matrix)
+            w = hrp_algo.optimize()
+        except:
+            print(memory, cov_matrix)
 
-        w = hrp_algo.optimize()
         w = pd.Series(
-            list(w.values),
+            list(w.values()),
             index=list(w.keys()),
             name=observation["returns"].name,
         )
