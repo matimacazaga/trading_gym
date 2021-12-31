@@ -62,7 +62,7 @@ class BaseEnv(Env):
         **kwargs,
     ):
 
-        if assets_data is not None and isinstance(assets_data, pd.DataFrame):
+        if assets_data is not None and isinstance(assets_data, dict):
 
             self.close = assets_data["close"]
 
@@ -106,29 +106,32 @@ class BaseEnv(Env):
         elif returns is None and (
             self.close is not None and isinstance(self.close, pd.DataFrame)
         ):
-            self._returns = self.close.pct_change().iloc[1:]
+            self._returns = self.close.pct_change(fill_method=None).iloc[
+                1:
+            ]  #! fill_method=None for avoiding filling NAs with 0, which may produce series with zero variance if a coin goes out of market.
+        else:
+            raise ValueError(
+                "Either 'returns' must be not None or 'close' must be a pandas DataFrame."
+            )
 
-            if cash:
-                self._returns.loc[:, "Cash"] = (
-                    1.0
-                    + np.random.normal(risk_free_rate, 0.01, size=len(self._returns))
-                ) ** (1 / 365.0) - 1
+        if cash:
+            self._returns.loc[:, "Cash"] = (
+                1.0 + np.random.normal(risk_free_rate, 0.01, size=len(self._returns))
+            ) ** (1 / 365.0) - 1
 
-            self.close = align_index(self._returns, self.close)
+        self.close = align_index(self._returns, self.close)
 
-            self.open = align_index(self._returns, self.open)
+        self.open = align_index(self._returns, self.open)
 
-            self.high = align_index(self._returns, self.high)
+        self.high = align_index(self._returns, self.high)
 
-            self.low = align_index(self._returns, self.low)
+        self.low = align_index(self._returns, self.low)
 
-            self.volume = align_index(self._returns, self.volume)
+        self.volume = align_index(self._returns, self.volume)
 
         num_instruments = len(self.universe)
 
-        self.action_space = PortfolioVector(
-            num_instruments, universe + ["Cash"] if cash else universe
-        )
+        self.action_space = PortfolioVector(num_instruments, self.universe)
 
         self.observation = Box(
             low=-np.inf, high=np.inf, shape=(num_instruments,), dtype=np.float32
