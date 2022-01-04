@@ -33,7 +33,7 @@ class RnnAgent(Agent):
         self.past_n_obs = past_n_obs
         self.retrain_each_n_obs = retrain_each_n_obs
         self.retrain_counter = 0
-        self.model = self.build_model(hidden_units)
+        self.hidden_units = hidden_units
         self.scaler = StandardScaler()
         self.w = self.action_space.sample()
 
@@ -52,8 +52,8 @@ class RnnAgent(Agent):
             y.append(seq_y)
         return np.array(X), np.array(y)
 
-    def reshape_memory(self, memory):
-        return memory.reshape((1, self.past_n_obs, self.observation_size))
+    def reshape_memory(self, memory, columns):
+        return memory.reshape((1, self.past_n_obs, columns))
 
     def reshape_training_data(self, X):
         return X
@@ -67,10 +67,18 @@ class RnnAgent(Agent):
 
         memory.dropna(axis=1, inplace=True)
 
-        if len(self.memory) < self.window:
+        if len(self.memory) < self.memory.maxlen:
+
             return self.action_space.sample()
 
-        if self.retrain_counter % self.retrain_each_n_obs == 0:
+        if (
+            self.retrain_counter % self.retrain_each_n_obs == 0
+            or self.observation_size != memory.shape[1]
+        ):
+
+            self.observation_size = memory.shape[1]
+
+            self.model = self.build_model(memory.shape[1], self.hidden_units)
 
             memory_ = self.scaler.fit_transform(memory.values)
 
@@ -86,11 +94,8 @@ class RnnAgent(Agent):
 
         prediction = self.model.predict(
             self.reshape_memory(
-                self.scaler.transform(
-                    memory.values[-self.past_n_obs :, :].reshape(
-                        -1, self.action_space.shape[0]
-                    )
-                ).ravel()
+                self.scaler.transform(memory.values[-self.past_n_obs :, :]).ravel(),
+                memory.shape[1],
             )
         )
 
@@ -121,7 +126,7 @@ class RnnLSTMAgent(RnnAgent):
 
     _id = "rnn-lstm"
 
-    def build_model(self, hidden_units):
+    def build_model(self, n_features, hidden_units):
 
         model = tf.keras.Sequential()
         model.add(
@@ -129,11 +134,11 @@ class RnnLSTMAgent(RnnAgent):
                 hidden_units,
                 activation="relu",
                 return_sequences=True,
-                input_shape=(self.past_n_obs, self.observation_size),
+                input_shape=(self.past_n_obs, n_features),
             )
         )
         model.add(tf.keras.layers.LSTM(hidden_units, activation="relu"))
-        model.add(tf.keras.layers.Dense(self.observation_size))
+        model.add(tf.keras.layers.Dense(n_features))
         model.compile(optimizer="adam", loss="mse")
         return model
 
