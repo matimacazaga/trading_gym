@@ -16,7 +16,7 @@ def calibrate_agent(
     start_eval_date: datetime,
 ):
 
-    for i, params in enumerate(agent_params_grid, start=3):
+    for i, params in enumerate(agent_params_grid):
 
         statistics = []
 
@@ -66,18 +66,21 @@ def calibrate_agent(
 
 if __name__ == "__main__":
 
-    # from trading_gym.agents.dlpopt import DeepLPortfolioAgent
-    from trading_gym.agents.genetic import GeneticAgent
+    # from trading_gym.agents.rnn import RnnLSTMAgent
+    from trading_gym.agents.dlpopt import DeepLPortfolioAgent
+
+    # from trading_gym.agents.genetic import GeneticAgent
 
     random_universes = pickle.load(open("./random_universes.pickle", "rb"))
-    # windows = [180, 60, 30, 15]
-    windows = [
-        15,
-    ]
+    # windows = [240, 180, 60]
+    windows = [180, 60, 30, 15]
+    # past_n_obs = [10, 15, 30]
     epochs = 200
     params_grid = []
     for w in windows:
-        params_grid.append({"window": w, "pop_size": 500, "generations": 200})
+        # for past_n_obs_ in past_n_obs:
+        # params_grid.append({"window": w, "pop_size": 500, "generations": 200}) $ genetic agent
+        params_grid.append({"window": w, "hidden_units": 50, "epochs": epochs})
     start = datetime(2019, 5, 1)
     end = datetime(2021, 9, 30)
     start_eval_date = datetime(2020, 1, 1)
@@ -85,7 +88,7 @@ if __name__ == "__main__":
         random_universes=random_universes[:10],
         start=start,
         end=end,
-        agent_class=GeneticAgent,
+        agent_class=DeepLPortfolioAgent,
         agent_params_grid=params_grid,
         start_eval_date=start_eval_date,
     )
