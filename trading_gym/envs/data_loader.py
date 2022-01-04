@@ -4,6 +4,7 @@ from datetime import datetime
 from .binance_wrapper import BinanceWrapper
 import warnings
 from joblib import Parallel, delayed
+from tqdm import tqdm
 
 
 class CryptoData:
@@ -129,7 +130,8 @@ class CryptoData:
             universe = self.supported_symbols
 
         dfs = Parallel(n_jobs=min(40, len(universe)), backend="threading")(
-            delayed(self._get_symbol_data)(symbol, start, end) for symbol in universe
+            delayed(self._get_symbol_data)(symbol, start, end)
+            for symbol in tqdm(universe)
         )
         for symbol, temp_df in zip(universe, dfs):
             tmp_df = self._get_symbol_data(symbol, start, end)
