@@ -47,6 +47,25 @@ def get_random_universes(
         and not symbol.startswith("PAX")
         and not symbol.startswith("EUR")
         and not symbol.startswith("MDX")
+        and symbol
+        not in [
+            "UNIDOWNUSDT",
+            "LTCDOWNUSDT",
+            "SUSHIDOWNUSDT",
+            "ETHDOWNUSDT",
+            "BNBDOWNUSDT",
+            "XLMDOWNUSDT",
+            "SXPDOWNUSDT",
+            "TRXDOWNUSDT",
+            "YFIDOWNUSDT",
+            "XTZDOWNUSDT",
+            "AAVEDOWNUSDT",
+            "DOTDOWNUSDT",
+            "LINKDOWNUSDT",
+            "ADADOWNUSDT",
+            "XRPDOWNUSDT",
+            "COCOSUSDT",
+        ]
     ]
 
     symbols = {}
