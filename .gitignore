@@ -1,3 +1,9 @@
-/trading_gym/tests_results
-.vscode
-.vscode/settings.json
+/trading_gym/testing/tests_results
+/.vscode
+/.vscode/settings.json
+random_universes.pickle
+development.ipynb
+calibration_analysis.ipynb
+Pipfile
+Pipfile.lock
+/calibration_results
