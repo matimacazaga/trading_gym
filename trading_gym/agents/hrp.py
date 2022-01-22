@@ -1,108 +1,13 @@
-from typing import Dict
+from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 import scipy.cluster.hierarchy as sch
+
+from ..utils.screener import Screener
 from .base import Agent
 from collections import deque
 from ..envs.spaces import PortfolioVector
 from pypfopt.hierarchical_portfolio import HRPOpt
-
-
-class HRP:
-    def __init__(self, sigma, corr_mat):
-
-        self.sigma = sigma
-        self.corr_mat = corr_mat
-
-    def tree_clustering(self):
-        dist = ((1.0 - self.corr_mat) * 0.5) ** 0.5
-        return sch.linkage(dist, "single")
-
-    def get_quasi_diag(self, link):
-
-        link = link.astype(int)
-
-        sort_ix = pd.Series([link[-1, 0], link[-1, 1]])
-
-        num_items = link[-1, 3]
-
-        while sort_ix.max() >= num_items:
-
-            sort_ix.index = range(0, sort_ix.shape[0] * 2, 2)
-
-            df_0 = sort_ix[sort_ix >= num_items]
-
-            i = df_0.index
-
-            j = df_0.values - num_items
-
-            sort_ix[i] = link[j, 0]
-
-            df_0 = pd.Series(link[j, 1], index=i + 1)
-
-            sort_ix = sort_ix.append(df_0)
-
-            sort_ix = sort_ix.sort_index()
-
-            sort_ix.index = range(sort_ix.shape[0])
-
-        return sort_ix.tolist()
-
-    def get_recursive_bisection(self, sort_ix):
-
-        w = pd.Series(1, index=sort_ix)
-
-        c_items = [sort_ix]
-
-        while len(c_items) > 0:
-
-            c_items = [
-                i[j:k]
-                for i in c_items
-                for j, k in ((0, len(i) // 2), (len(i) // 2, len(i)))
-                if len(i) > 1
-            ]
-
-            for i in range(0, len(c_items), 2):
-                c_items_0 = c_items[i]
-                c_items_1 = c_items[i + 1]
-                c_var_0 = self.get_cluster_var(c_items_0)
-                c_var_1 = self.get_cluster_var(c_items_1)
-                alpha = 1.0 - (c_var_0 / (c_var_0 + c_var_1))
-                w[c_items_0] *= alpha
-                w[c_items_1] *= 1 - alpha
-
-        return w
-
-    def get_cluster_var(self, c_items):
-
-        cov_ = self.sigma.loc[c_items, c_items]
-
-        w_ = self.get_ivp(cov_).reshape(-1, 1)
-
-        c_var = np.dot(np.dot(w_.T, cov_), w_)[0, 0]
-
-        return c_var
-
-    def get_ivp(self, cov):
-
-        ivp = 1.0 / np.diag(cov)
-
-        ivp /= ivp.sum()
-
-        return ivp
-
-    def get_weights(self):
-
-        link = self.tree_clustering()
-
-        sort_ix = self.get_quasi_diag(link)
-
-        sort_ix = self.corr_mat.index[sort_ix].tolist()
-
-        w = self.get_recursive_bisection(sort_ix)
-
-        return w.values
 
 
 class HRPAgent(Agent):
@@ -110,47 +15,70 @@ class HRPAgent(Agent):
     _id = "hrp"
 
     def __init__(
-        self, action_space: PortfolioVector, window: int = 50, *args, **kwargs
+        self,
+        action_space: PortfolioVector,
+        window: int = 50,
+        screener: Optional[Screener] = None,
+        rebalance_each_n_obs: int = 1,
+        *args,
+        **kwargs
     ):
 
         self.action_space = action_space
-        self.memory = deque(maxlen=window)
+        self.observation_size = self.action_space.shape[0]
+        self.memory_returns = deque(maxlen=window)
+        self.memory_volume = deque(maxlen=window)
         self.w = self.action_space.sample()
+        self.screener = screener
+        self.rebalance_each_n_obs = rebalance_each_n_obs
+        self.rebalance_counter = 0
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs):
 
-        self.memory.append(observation["returns"])
+        self.memory_returns.append(observation["returns"])
+        self.memory_volume.append(observation["volume"])
 
     def act(self, observation: Dict[str, pd.Series]) -> np.ndarray:
 
-        memory = pd.DataFrame(self.memory)
-
-        memory.dropna(axis=1, inplace=True)
-
-        if len(self.memory) != self.memory.maxlen:
+        if len(self.memory_returns) != self.memory_returns.maxlen:
 
             return self.action_space.sample()
 
-        cov_matrix = memory.cov()
-        try:
-            hrp_algo = HRPOpt(memory, cov_matrix)
+        returns = pd.DataFrame(self.memory_returns).dropna(axis=1)
+
+        volume = pd.DataFrame(self.memory_volume).loc[:, returns.columns]
+
+        if self.screener:
+            assets_list = self.screener.filter(returns, volume)
+            returns = returns.loc[:, assets_list]
+
+        if (
+            self.rebalance_counter % self.rebalance_each_n_obs == 0
+            or self.observation_size != returns.shape[1]
+        ):
+
+            self.observation_size = returns.shape[1]
+
+            cov_matrix = returns.cov()
+
+            hrp_algo = HRPOpt(returns, cov_matrix)
 
             w = hrp_algo.optimize()
-        except:
-            print(memory, cov_matrix)
 
-        w = pd.Series(
-            list(w.values()),
-            index=list(w.keys()),
-            name=observation["returns"].name,
-        )
+            w = pd.Series(
+                list(w.values()),
+                index=list(w.keys()),
+                name=observation["returns"].name,
+            )
 
-        if np.any(w < 0):
-            w += np.abs(w.min())
+            if np.any(w < 0):
+                w += np.abs(w.min())
 
-        if w.sum() > 1.0 + 1e-2:
-            w = w / w.sum()
+            if w.sum() > 1.0 + self.tol:
+                w /= w.sum()
 
-        self.w = w
+            self.w = w
+
+        self.rebalance_counter += 1
 
         return self.w

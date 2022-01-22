@@ -7,3 +7,5 @@ calibration_analysis.ipynb
 Pipfile
 Pipfile.lock
 /calibration_results
+assets_data_training.pickle
+/simulation_results

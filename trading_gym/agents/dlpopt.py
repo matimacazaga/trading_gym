@@ -1,10 +1,11 @@
-from typing import Dict
+from typing import Dict, Optional
 import tensorflow as tf
 import tensorflow.keras as keras
 import numpy as np
 import pandas as pd
 from collections import deque
-from trading_gym.envs.spaces import PortfolioVector
+from ..envs.spaces import PortfolioVector
+from ..utils.screener import Screener
 from .base import Agent
 
 
@@ -70,42 +71,66 @@ class DeepLPortfolioAgent(Agent):
         window: int,
         hidden_units: int = 20,
         epochs=200,
+        screener: Optional[Screener] = None,
+        rebalance_each_n_obs: int = 7,
         *args,
         **kwargs
     ):
 
         self.action_space = action_space
-        self.memory = deque(maxlen=window)
+        self.observation_size = self.action_space.shape[0]
+        self.memory_returns = deque(maxlen=window)
+        self.memory_volume = deque(maxlen=window)
         self.w = self.action_space.sample()
         self.hidden_units = hidden_units
         self.epochs = epochs
+        self.screener = screener
+        self.rebalance_each_n_obs = rebalance_each_n_obs
+        self.rebalance_counter = 0
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs):
 
-        self.memory.append(observation["returns"])
+        self.memory_returns.append(observation["returns"])
+        self.memory_volume.append(observation["volume"])
 
     def act(self, observation: Dict[str, pd.Series]) -> pd.Series:
+        if len(self.memory_returns) != self.memory_returns.maxlen:
 
-        memory = pd.DataFrame(self.memory)
-
-        memory.dropna(axis=1, inplace=True)
-
-        if len(self.memory) != self.memory.maxlen:
             return self.action_space.sample()
-        else:
+
+        returns = pd.DataFrame(self.memory_returns).dropna(axis=1)
+
+        volume = pd.DataFrame(self.memory_volume).loc[:, returns.columns]
+
+        if (
+            self.rebalance_counter % self.rebalance_each_n_obs == 0
+            or self.observation_size != returns.shape[1]
+        ):
+
+            self.observation_size = returns.shape[1]
+
+            if self.screener:
+                if isinstance(self.screener, tuple) or isinstance(self.screener, list):
+                    for screener in self.screener:
+                        assets_list = screener.filter(returns, volume)
+                        returns = returns.loc[:, assets_list]
+                        volume = volume.loc[:, assets_list]
+                else:
+                    assets_list = self.screener.filter(returns, volume)
+                    returns = returns.loc[:, assets_list]
 
             dlpopt = DeepLPortfolio(
-                self.memory.maxlen * memory.shape[1],
+                self.memory_returns.maxlen * returns.shape[1],
                 self.hidden_units,
-                memory.shape[1],
-                memory.values,
+                returns.shape[1],
+                returns.values,
             )
 
             model = dlpopt.build_model()
 
             # ravel("F") ravels the array column first
             model.fit(
-                memory.values.ravel("F")[np.newaxis, :],
+                returns.values.ravel("F")[np.newaxis, :],
                 np.zeros(
                     (
                         1,
@@ -118,13 +143,19 @@ class DeepLPortfolioAgent(Agent):
             )
 
             w = model.predict(
-                tf.constant(memory.values.ravel("F")[np.newaxis, :], float)
+                tf.constant(returns.values.ravel("F")[np.newaxis, :], float)
             )[0]
+
+            if w.sum() > 1.0 + self.tol:
+
+                w /= w.sum()
 
             self.w = pd.Series(
                 w,
-                index=memory.columns,
+                index=returns.columns,
                 name=observation["returns"].name,
             )
 
-            return self.w
+        self.rebalance_counter += 1
+
+        return self.w

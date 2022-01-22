@@ -1,15 +1,11 @@
-import itertools
-from typing import Any, Dict, List, Tuple
+from typing import Dict, Optional, Tuple
 import numpy as np
-from numpy.lib.function_base import select
 import pandas as pd
 from collections import deque
+from ..utils.screener import Screener
 from .base import Agent
-from dataclasses import dataclass
-from joblib import Parallel, delayed
 from ..envs.spaces import PortfolioVector
-from numba import prange, int64, float64, typed, types, njit
-from numba.experimental import jitclass
+from numba import prange, njit
 
 eps = np.finfo(float).eps
 
@@ -86,7 +82,7 @@ def mutation(individual: np.ndarray, mutation_prob: float):
     return individual
 
 
-@njit(nogil=True, parallel=False)
+@njit(nogil=True, parallel=True)
 def run_genetic_algorithm(
     mean_returns: np.ndarray,
     sigma_returns: np.ndarray,
@@ -165,13 +161,19 @@ class GeneticAgent(Agent):
         window: int,
         generations: int = 100,
         pop_size: int = 500,
+        screener: Optional[Screener] = None,
+        rebalance_each_n_obs: int = 1,
         *args,
         **kwargs
     ):
 
         self.action_space = action_space
 
-        self.memory = deque(maxlen=window)
+        self.observation_size = self.action_space.shape[0]
+
+        self.memory_returns = deque(maxlen=window)
+
+        self.memory_volume = deque(maxlen=window)
 
         self.w = self.action_space.sample()
 
@@ -179,38 +181,58 @@ class GeneticAgent(Agent):
 
         self.pop_size = pop_size
 
+        self.screener = screener
+
+        self.rebalance_each_n_obs = rebalance_each_n_obs
+
+        self.rebalance_counter = 0
+
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs) -> None:
 
-        self.memory.append(observation["returns"])
+        self.memory_returns.append(observation["returns"])
+        self.memory_volume.append(observation["volume"])
 
-    def act(self, observation: Dict[str, pd.Series]) -> np.ndarray:
+    def act(self, observation: Dict[str, pd.Series]) -> pd.Series:
 
-        memory = pd.DataFrame(self.memory)
-
-        memory.dropna(axis=1, inplace=True)
-
-        mu = np.mean(memory.values, axis=0)
-
-        if len(self.memory) != self.memory.maxlen:
+        if len(self.memory_returns) != self.memory_returns.maxlen:
 
             return self.action_space.sample()
 
-        else:
+        returns = pd.DataFrame(self.memory_returns).dropna(axis=1)
+        volume = pd.DataFrame(self.memory_volume).loc[:, returns.columns]
 
-            sigma = np.cov(memory.values, rowvar=False)
+        if self.screener:
+            if isinstance(self.screener, tuple) or isinstance(self.screener, list):
+                for screener in self.screener:
+                    assets_list = screener.filter(returns, volume)
+                    returns = returns.loc[:, assets_list]
+                    volume = volume.loc[:, assets_list]
+            else:
+                assets_list = self.screener.filter(returns, volume)
+                returns = returns.loc[:, assets_list]
 
-        # genetic_algo = GeneticAlgorithm(mu, sigma, self.pop_size, self.generations)
+        if (
+            self.rebalance_counter % self.rebalance_each_n_obs == 0
+            or self.observation_size != returns.shape[1]
+        ):
 
-        # self.w = genetic_algo.evolve()
+            self.observation_size = returns.shape[1]
 
-        w = run_genetic_algorithm(mu, sigma, self.pop_size, self.generations)
+            mu = returns.mean(axis=0).values
 
-        w /= w.sum()
+            sigma = returns.cov().values
 
-        self.w = pd.Series(
-            w,
-            index=memory.columns,
-            name=observation["returns"].name,
-        )
+            w = run_genetic_algorithm(mu, sigma, self.pop_size, self.generations)
+
+            if w.sum() > 1.0 + self.tol:
+                w /= w.sum()
+
+            self.w = pd.Series(
+                w,
+                index=returns.columns,
+                name=observation["returns"].name,
+            )
+
+        self.rebalance_counter += 1
 
         return self.w

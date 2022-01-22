@@ -1,7 +1,10 @@
+from typing import Optional
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from collections import deque
+
+from ..utils.screener import Screener
 from .base import Agent
 from ..envs.spaces import PortfolioVector
 from ..utils.numpy_utils import softmax
@@ -19,13 +22,16 @@ class RnnAgent(Agent):
         policy="softmax",
         batch_size=32,
         epochs=50,
+        screener: Optional[Screener] = None,
+        rebalance_each_n_obs: int = 1,
         *args,
         **kwargs
     ):
 
         self.action_space = action_space
         self.observation_size = self.action_space.shape[0]
-        self.memory = deque(maxlen=window)  # []
+        self.memory_returns = deque(maxlen=window)  # []
+        self.memory_volume = deque(maxlen=window)
         self.batch_size = batch_size
         self.epochs = epochs
         self.policy = policy
@@ -36,9 +42,13 @@ class RnnAgent(Agent):
         self.hidden_units = hidden_units
         self.scaler = StandardScaler()
         self.w = self.action_space.sample()
+        self.screener = screener
+        self.rebalance_each_n_obs = rebalance_each_n_obs
+        self.rebalance_counter = 0
 
     def observe(self, observation, action, reward, done, next_reward):
-        self.memory.append(observation["returns"])
+        self.memory_returns.append(observation["returns"])
+        self.memory_volume.append(observation["volume"])
 
     def split_sequences(self, sequences):
         X, y = [], []
@@ -62,69 +72,94 @@ class RnnAgent(Agent):
         raise NotImplementedError
 
     def act(self, observation):
-
-        memory = pd.DataFrame(self.memory)
-
-        memory.dropna(axis=1, inplace=True)
-
-        if len(self.memory) < self.memory.maxlen:
+        if len(self.memory_returns) != self.memory_returns.maxlen:
 
             return self.action_space.sample()
 
+        returns = pd.DataFrame(self.memory_returns).dropna(axis=1)
+
+        volume = pd.DataFrame(self.memory_volume).loc[:, returns.columns]
+
+        if self.screener:
+
+            assets_list = self.screener.filter(returns, volume)
+
+            returns = returns.loc[:, assets_list]
+
         if (
-            self.retrain_counter % self.retrain_each_n_obs == 0
-            or self.observation_size != memory.shape[1]
+            self.rebalance_counter % self.rebalance_each_n_obs == 0
+            or self.observation_size != returns.shape[1]
         ):
 
-            self.observation_size = memory.shape[1]
+            if (
+                self.retrain_counter % self.retrain_each_n_obs == 0
+                or self.observation_size != returns.shape[1]
+            ):
 
-            self.model = self.build_model(memory.shape[1], self.hidden_units)
+                self.observation_size = returns.shape[1]
 
-            memory_ = self.scaler.fit_transform(memory.values)
+                self.model = self.build_model(returns.shape[1], self.hidden_units)
 
-            X, y = self.split_sequences(memory_)
+                memory_ = self.scaler.fit_transform(returns.values)
 
-            X = self.reshape_training_data(X)
+                X, y = self.split_sequences(memory_)
 
-            self.model.fit(
-                X, y, batch_size=self.batch_size, epochs=self.epochs, verbose=0
+                X = self.reshape_training_data(X)
+
+                self.model.fit(
+                    X, y, batch_size=self.batch_size, epochs=self.epochs, verbose=0
+                )
+
+            self.retrain_counter += 1
+            self.rebalance_counter += 1
+
+            prediction = self.model.predict(
+                self.reshape_memory(
+                    self.scaler.transform(
+                        returns.values[-self.past_n_obs :, :]
+                    ).ravel(),
+                    returns.shape[1],
+                )
             )
 
-        self.retrain_counter += 1
+            if self.policy == "softmax":
 
-        prediction = self.model.predict(
-            self.reshape_memory(
-                self.scaler.transform(memory.values[-self.past_n_obs :, :]).ravel(),
-                memory.shape[1],
+                w = self.scaler.inverse_transform(prediction.reshape(1, -1)).ravel()
+
+                w += w.min()
+
+                w[np.isnan(w)] = 0.0
+
+                w = softmax(w)
+
+                if np.all(w == 0.0) or np.any(np.isnan(w)):
+
+                    w = np.random.uniform(0, 1, w.shape)
+                    w /= w.sum()
+
+            elif self.policy == "best":
+
+                w = np.zeros_like(
+                    self.scaler.inverse_transform(prediction.reshape(1, -1))
+                ).ravel()
+
+                w[np.argmax(prediction)] = 1.0
+
+            if w.sum() > 1.0 + self.tol:
+                w /= w.sum()
+
+            self.w = pd.Series(
+                w,
+                index=returns.columns,
+                name=observation["returns"].name,
             )
-        )
-
-        if self.policy == "softmax":
-
-            w = self.scaler.inverse_transform(prediction.reshape(1, -1)).ravel()
-
-            w = softmax(w)
-
-        elif self.policy == "best":
-
-            w = np.zeros_like(
-                self.scaler.inverse_transform(prediction.reshape(1, -1))
-            ).ravel()
-
-            w[np.argmax(prediction)] = 1.0
-
-        self.w = pd.Series(
-            w,
-            index=memory.columns,
-            name=observation["returns"].name,
-        )
 
         return self.w
 
 
 class RnnLSTMAgent(RnnAgent):
 
-    _id = "rnn-lstm"
+    _id = "rnn_lstm"
 
     def build_model(self, n_features, hidden_units):
 
@@ -146,7 +181,7 @@ class RnnLSTMAgent(RnnAgent):
 # TODO: rnn classification model
 class RnnGRUAgent(RnnAgent):
 
-    _id = "rnn-gru"
+    _id = "rnn_gru"
 
     def build_model(self, hidden_units):
 

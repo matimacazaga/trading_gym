@@ -8,6 +8,7 @@ from abc import ABCMeta
 class Agent(metaclass=ABCMeta):
 
     _id = "base"
+    tol = 1e-3
 
     def __init__(self, **kwargs):
         raise NotImplementedError

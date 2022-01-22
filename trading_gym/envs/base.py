@@ -58,7 +58,8 @@ class BaseEnv(Env):
         assets_data: Optional[Dict[str, pd.DataFrame]] = None,
         returns: Optional[pd.DataFrame] = None,
         cash: bool = True,
-        risk_free_rate: float = 0.12,
+        risk_free_rate: float = 0.08,
+        fee: float = 0.0,
         **kwargs,
     ):
 
@@ -146,6 +147,8 @@ class BaseEnv(Env):
         )
 
         self._fig, self._axes = None, None
+
+        self.fee = fee
 
     @property
     def universe(self) -> List[str]:
@@ -307,6 +310,9 @@ class BaseEnv(Env):
 
         self._validate_agents()
 
+        # For fees
+        prev_index = self.index
+
         self._counter += 1
 
         observation = self._get_observation()
@@ -324,11 +330,21 @@ class BaseEnv(Env):
 
         for name, _action in action.items():
 
-            nan_symbols = {
-                symbol: 0.0 for symbol in self.universe if symbol not in _action.index
-            }
+            # nan_symbols = {
+            #     symbol: 0.0 for symbol in self.universe if symbol not in _action.index
+            # }
 
-            _action = _action.append(pd.Series(nan_symbols))
+            nan_symbols = [
+                symbol for symbol in self.universe if symbol not in _action.index
+            ]
+
+            _action = _action.append(
+                pd.Series(
+                    np.zeros(len(nan_symbols)),
+                    index=nan_symbols,
+                    name=observation["returns"].name,
+                )
+            )
 
             if not self.action_space.contains(_action):
                 raise ValueError(f"Invalid action for agent {name}: {_action}")
@@ -338,9 +354,14 @@ class BaseEnv(Env):
             # self.agents[name].rewards.loc[self.index] = self._get_reward(_action)
             reward_ = self._get_reward(_action)
 
-            self.agents[name].rewards[self.index] = reward_
+            prev_action = self.agents[name].actions[prev_index]
+
+            commission = self.fee * (_action - prev_action).abs()
+
+            self.agents[name].rewards[self.index] = reward_ - commission
             # reward[name] = self.agents[name].rewards.loc[self.index].sum()
-            reward[name] = reward_.sum()
+
+            reward[name] = (reward_ - commission).sum()
 
             if done:
                 self.agents[name].actions = pd.DataFrame.from_dict(

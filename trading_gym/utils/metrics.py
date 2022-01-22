@@ -454,6 +454,26 @@ def std_dev(
     return returns.std(ddof=1, axis=0)
 
 
+def semi_std_dev(
+    returns: Union[np.ndarray, pd.Series]
+) -> Union[float, np.ndarray, pd.Series]:
+    """
+    Computes the semi standard deviation of the returns (standard deviation of
+    the negative returns).
+
+    Parameters
+    ----------
+    returns: np.ndarray | pd.Series
+        Strategy returns.
+
+    Returns
+    -------
+    float | np.ndarray | pd.Series
+        Standard deviation of the returns.
+    """
+    return returns[returns < 0].std(ddof=1, axis=0)
+
+
 def tail_ratio(
     returns: Union[np.ndarray, pd.Series, pd.DataFrame]
 ) -> Union[float, np.ndarray]:

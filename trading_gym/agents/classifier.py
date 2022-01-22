@@ -1,4 +1,4 @@
-from pandas.core.algorithms import mode
+from ..utils.screener import Screener
 from .base import Agent
 from ..envs.spaces import PortfolioVector
 from collections import deque
@@ -14,38 +14,52 @@ from xgboost import XGBClassifier
 
 
 class ClassifierAgent(Agent):
+    _id = "classifier"
+
     def __init__(
         self,
         action_space: PortfolioVector,
         window: int,
-        hidden_units: int = 20,
-        epochs: int = 200,
         days_ahead: int = 1,
         target_type: str = "binary",
         q: Optional[int] = None,
         reduce_dimensionality: bool = True,
         apply_wavelet_decomp: bool = False,
+        screener: Optional[Screener] = None,
+        n_assets: Optional[int] = None,
+        rebalance_each_n_obs: int = 1,
+        retrain_each_n_obs: int = 15,
         *args,
         **kwargs
     ):
 
         self.action_space = action_space
+        self.observation_size = self.action_space.shape[0]
         self.memory_close = deque(maxlen=window)
         self.memory_high = deque(maxlen=window)
         self.memory_low = deque(maxlen=window)
         self.memory_volume = deque(maxlen=window)
+        self.memory_returns = deque(maxlen=window)
         self.w = self.action_space.sample()
-        self.hidden_units = hidden_units
-        self.epochs = epochs
         self.days_ahead = days_ahead
         self.target_type = target_type
         self.q = q
+        self.n_assets = n_assets
         self.scaler = StandardScaler()
-        self.pca = PCA(n_components=0.95, random_state=42)
+        self.reduce_dimensionality = reduce_dimensionality
+        if reduce_dimensionality:
+            self.pca = PCA(n_components=0.95, random_state=42)
+        self.apply_wavelet_decomp = apply_wavelet_decomp
+        self.screener = screener
+        self.rebalance_each_n_obs = rebalance_each_n_obs
+        self.rebalance_counter = 0
+        self.retrain_each_n_obs = retrain_each_n_obs
+        self.retrain_counter = 0
 
     def observe(self, observation: Dict[str, pd.Series], *args, **kwargs):
 
         self.memory_close.append(observation["close"])
+        self.memory_returns.append(observation["returns"])
         self.memory_low.append(observation["low"])
         self.memory_high.append(observation["high"])
         self.memory_volume.append(observation["volume"])
@@ -100,6 +114,8 @@ class ClassifierAgent(Agent):
                 .values
             )
 
+        target.rename({"level_0": "date"}, axis=1, inplace=True)
+
         return target
 
     def preprocess_data(
@@ -153,8 +169,12 @@ class ClassifierAgent(Agent):
         df = (
             co.stack()
             .reset_index()
-            .rename({"level_1": "symbol", 0: "chaikin_oscillator"}, axis=1)
+            .rename(
+                {"level_0": "date", "level_1": "symbol", 0: "chaikin_oscillator"},
+                axis=1,
+            )
         )
+
         for feature_name, feature_df in features_dfs:
             scaler = StandardScaler()
             tmp = pd.DataFrame(
@@ -166,8 +186,11 @@ class ClassifierAgent(Agent):
             tmp = (
                 tmp.stack()
                 .reset_index()
-                .rename({"level_1": "symbol", 0: feature_name}, axis=1)
+                .rename(
+                    {"level_0": "date", "level_1": "symbol", 0: feature_name}, axis=1
+                )
             )
+
             df = df.merge(tmp, how="inner", on=["date", "symbol"])
 
         target = self.create_target(
@@ -213,65 +236,104 @@ class ClassifierAgent(Agent):
             df.drop(["date", "symbol", "target"], axis=1),
         )[:, -1]
 
+        if self.n_assets:
+            output.sort_values("prob", ascending=False, inplace=True)
+            output = output.iloc[: self.n_assets]
+
         output.loc[:, "weight"] = output.loc[:, "prob"] / output.loc[:, "prob"].sum()
 
-        output = output.loc[:, ["symbol", "weight"]].set_index("symbol")
+        output = pd.Series(
+            output.loc[:, "weight"].values, index=output.loc[:, "symbol"].values
+        )
+
+        # output = output.loc[:, ["symbol", "weight"]].set_index("symbol")
 
         return output
 
-    def act(
-        self,
-    ):
-        memory_close = pd.DataFrame(self.memory_close).dropna(axis=1)
-        memory_high = pd.DataFrame(self.memory_high).dropna(axis=1)
-        memory_low = pd.DataFrame(self.memory_low).dropna(axis=1)
-        memory_volume = pd.DataFrame(self.memory_volume).dropna(axis=1)
+    def act(self, observation: Dict[str, pd.Series]) -> pd.Series:
 
-        if len(self.memory_close) < self.memory_close.maxlen:
+        if len(self.memory_returns) != self.memory_returns.maxlen:
 
             return self.action_space.sample()
 
-        df = self.preprocess_data(memory_close, memory_low, memory_high, memory_volume)
+        returns = pd.DataFrame(self.memory_returns).dropna(axis=1)
+        close = pd.DataFrame(self.memory_close).loc[:, returns.columns]
+        high = pd.DataFrame(self.memory_high).loc[:, returns.columns]
+        low = pd.DataFrame(self.memory_low).loc[:, returns.columns]
+        volume = pd.DataFrame(self.memory_volume).loc[:, returns.columns]
 
-        if self.reduce_dimensionality:
+        if self.screener:
 
-            p_components = self.pca.fit_transform(
-                df.drop(["date", "symbol", "target"], axis=1)
-            )
+            assets_list = self.screener.filter(returns, volume)
+            returns = returns.loc[:, assets_list]
+            close = close.loc[:, assets_list]
+            high = high.loc[:, assets_list]
+            volume = volume.loc[:, assets_list]
+            low = low.loc[:, assets_list]
 
-            df = df.loc[:, ["date", "symbol", "target"]]
+        if (
+            self.rebalance_counter % self.rebalance_each_n_obs == 0
+            or self.observation_size != returns.shape[1]
+        ):
+            df = self.preprocess_data(close, low, high, volume)
 
-            df.loc[:, range(p_components.shape[1])] = p_components
+            if self.reduce_dimensionality:
 
-        if self.apply_wavelet_decomp:
+                p_components = self.pca.fit_transform(
+                    df.drop(["date", "symbol", "target"], axis=1)
+                )
 
-            df = self.wavelet_decomposition(df)
+                df = df.loc[:, ["date", "symbol", "target"]]
 
-        if self.retrain_counter % self.retrain_each_n_obs:
+                df.loc[:, range(p_components.shape[1])] = p_components
 
-            X = df.dropna(axis=0, subset=["target"]).drop(
-                ["date", "symbol", "target"], axis=1
-            )
+            if self.apply_wavelet_decomp:
 
-            y = df.dropna(axis=0, subset=["target"]).loc[:, "target"]
+                df = self.wavelet_decomposition(df)
 
-            xgb = XGBClassifier(n_jobs=-1, random_state=42, eval_metric="logloss")
+            if self.retrain_counter % self.retrain_each_n_obs == 0:
 
-            params = {
-                "n_estimators": [200, 500, 1000],
-                "learning_rate": [0.001, 0.01, 0.02],
-                "reg_alpha": [0.001, 0.1, 1.0, 10.0],
-                "reg_lambda": [0.001, 0.1, 1.0, 10.0],
-            }
+                X = df.dropna(axis=0, subset=["target"]).drop(
+                    ["date", "symbol", "target"], axis=1
+                )
 
-            self.grid = GridSearchCV(xgb, params, n_jobs=-1, cv=3)
+                y = df.dropna(axis=0, subset=["target"]).loc[:, "target"].astype(int)
 
-            self.grid.fit(X, y)
+                xgb = XGBClassifier(
+                    n_jobs=-1,
+                    random_state=42,
+                    eval_metric="logloss",
+                    use_label_encoder=False,
+                    n_estimators=250,
+                )
 
-        last_obs_date = df.loc[:, "date"].max()
+                # params = {
+                #     "n_estimators": [200, 500, 1000],
+                #     "learning_rate": [0.001, 0.01, 0.02],
+                #     "reg_alpha": [0.001, 0.1, 1.0, 10.0],
+                #     "reg_lambda": [0.001, 0.1, 1.0, 10.0],
+                # }
 
-        last_obs = df.loc[df.loc[:, "date"] == last_obs_date]
+                # self.grid = GridSearchCV(xgb, params, n_jobs=24, cv=3)
 
-        self.w = self.get_weights(last_obs)
+                self.grid = xgb
+
+                self.grid.fit(X, y)
+
+            last_obs_date = df.loc[:, "date"].max()
+
+            last_obs = df.loc[df.loc[:, "date"] == last_obs_date]
+
+            w = self.get_weights(last_obs)
+
+            w.name = observation["returns"].name
+
+            if np.sum(w) > 1.0 + self.tol:
+                w /= w.sum()
+
+            self.w = w
+
+        self.retrain_counter += 1
+        self.rebalance_counter += 1
 
         return self.w
